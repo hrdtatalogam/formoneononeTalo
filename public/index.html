@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Form Review Kinerja One-on-One</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+  <div class="app" id="formApp">
+
+    <div class="letterhead">
+       <div class="logo-row">
+    <div class="logo-box logo-box--fallback">RK</div>
+    <div>
+      <div class="eyebrow">Human Capital &middot; FM.HC-PERF.01</div>
+      <h1 id="formTitle">Form Review Kinerja One-on-One (Tahunan)</h1>
+      <p class="sub" id="formSub">Diisi bersama oleh atasan (penilai) dan karyawan yang dinilai. Data hanya dapat diakses oleh Tim HC.</p>
+    </div>
+       </div>
+    </div>
+
+    <div id="resumeBanner" class="resume-banner" style="display:none;">
+      <span id="resumeBannerText">Melanjutkan draft yang tersimpan sebelumnya.</span>
+    </div>
+
+    <div id="loadingState" class="hint" style="padding:20px;">Memuat formulir…</div>
+
+    <div class="layout" id="formLayout" style="display:none;">
+      <nav class="sidenav" id="sidenav">
+        <div class="progress-label">BAGIAN <span id="stepLabel">1</span> DARI <span id="stepTotal">1</span></div>
+      </nav>
+
+      <div class="panel">
+        <div class="file-budget" id="fileBudget" style="display:none;">
+          <div class="file-budget-head">
+            <b>Total ukuran file terpilih</b>
+            <span id="fileBudgetText">0KB / 4.0MB</span>
+          </div>
+          <div class="file-budget-track"><div class="file-budget-fill" id="fileBudgetFill"></div></div>
+        </div>
+        <div id="alertBox"></div>
+        <form id="candidateForm">
+          <div id="sectionsContainer"></div>
+        </form>
+
+        <div class="nav-actions">
+          <button type="button" class="btn btn-ghost" id="prevBtn">&larr; Sebelumnya</button>
+          <div class="nav-actions-right">
+            <button type="button" class="btn btn-outline" id="saveDraftBtn">Simpan &amp; Lanjutkan Nanti</button>
+            <button type="button" class="btn btn-primary" id="nextBtn">Selanjutnya &rarr;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="draftModal" class="modal-overlay" style="display:none;">
+      <div class="modal-box">
+        <h3>Draft tersimpan</h3>
+        <p class="hint">Simpan link di bawah ini. Buka link ini dari perangkat manapun untuk melanjutkan pengisian dari titik terakhir.</p>
+        <div class="modal-link-row">
+          <input type="text" id="draftLinkInput" readonly />
+          <button type="button" class="btn btn-primary" id="copyDraftLinkBtn">Salin Link</button>
+        </div>
+        <p class="hint" id="draftCopiedHint" style="display:none; color:var(--navy-700, #17406b);">Link disalin ke clipboard.</p>
+        <button type="button" class="btn btn-ghost" id="closeDraftModalBtn" style="margin-top:14px;">Tutup &amp; Lanjut Isi</button>
+      </div>
+    </div>
+
+    <div id="successState" class="panel" style="display:none; text-align:center;">
+      <h2 style="font-family:var(--font-display); color:var(--navy-900);">Terima kasih!</h2>
+      <p class="hint">Review kinerja ini sudah kami terima dan tersimpan final. Tidak ada perubahan lebih lanjut yang bisa dilakukan lewat link ini.</p>
+    </div>
+
+<footer class="note">
+  (2026) Human Capital Management
+  <div class="contact-line">
+    hrd.tatalogam@gmail.com
+  </div>
+</footer>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Admin — Review Kinerja One-on-One</title>
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <div id="loginScreen" class="login-box">
+    <h1>Admin Panel</h1>
+    <p class="hint" style="margin-bottom:16px;">Khusus Tim HC. Masukkan username &amp; password untuk masuk.</p>
+    <div id="loginAlert"></div>
+    <div class="field">
+      <label for="userInput">Username</label>
+      <input type="text" id="userInput" autocomplete="username" autocapitalize="off" />
+    </div>
+    <div class="field">
+      <label for="pwInput">Password</label>
+      <input type="password" id="pwInput" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary" id="loginBtn" style="width:100%;">Masuk</button>
+    <p class="hint" style="margin-top:14px;">Lupa password? Minta Super Admin mereset password akunmu lewat tab Kelola User.</p>
+  </div>
+
+  <div id="adminScreen" class="admin-shell" style="display:none;">
+    <div class="admin-topbar">
+      <h1>Panel Admin — Data Review Kinerja</h1>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <span class="hint" id="whoAmI" style="margin:0;"></span>
+        <button class="btn btn-ghost" id="logoutBtn">Keluar</button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="submissions">Data Review</button>
+      <button class="tab-btn" data-tab="questions">Kelola Formulir</button>
+      <button class="tab-btn" data-tab="users" id="usersTabBtn" style="display:none;">Kelola User</button>
+    </div>
+
+    <div id="tab-submissions">
+      <div id="subAlert"></div>
+      <div class="toolbar" id="subToolbar" style="display:none;">
+        <div class="search-wrap">
+          <input type="text" id="subSearchInput" class="search-input" placeholder="Cari nama karyawan…" autocomplete="off" />
+          <button type="button" id="subSearchClear" class="search-clear">&times;</button>
+        </div>
+        <button class="btn btn-gold" id="downloadAllBtn">&#8681; Download Semua Data</button>
+      </div>
+      <div class="result-count" id="subResultCount" style="display:none;"></div>
+      <div class="toolbar" id="subFilterToolbar" style="margin-top:0;">
+        <div class="field" style="margin:0;">
+          <label for="subStatusFilter" class="hint" style="margin:0 0 4px;">Filter</label>
+          <select id="subStatusFilter">
+            <option value="">Semua (Draft &amp; Final)</option>
+            <option value="draft">Draft (belum selesai)</option>
+            <option value="final">Sudah Final</option>
+          </select>
+        </div>
+      </div>
+      <div id="submissionsContainer"><p class="hint">Memuat data…</p></div>
+    </div>
+
+    <div id="tab-questions" style="display:none;">
+      <div id="qAlert"></div>
+
+      <div class="card">
+        <p class="hint" style="margin-bottom:14px;">Atur bagian (section) dan pertanyaan yang muncul di formulir review. Perubahan berlaku langsung setelah disimpan, tanpa perlu deploy ulang.</p>
+        <h3 class="card-title">Bagian Formulir</h3>
+        <div id="sectionsList"></div>
+        <button class="btn btn-ghost" id="addSectionBtn" style="margin-top:10px;">+ Tambah Bagian</button>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3 class="card-title">Pertanyaan</h3>
+        <div id="questionsList"></div>
+        <button class="btn btn-ghost" id="addQuestionBtn" style="margin-top:10px;">+ Tambah Pertanyaan</button>
+      </div>
+
+      <button class="btn btn-primary" id="saveQuestionsBtn" style="margin-top:14px;">Simpan Perubahan</button>
+    </div>
+
+    <div id="tab-users" style="display:none;">
+      <div id="usersAlert"></div>
+
+      <div class="card">
+        <h3 class="card-title">Ganti Password Saya</h3>
+        <p class="hint" style="margin-bottom:14px;">Berlaku untuk akun yang sedang login.</p>
+        <div class="field">
+          <label for="ownNewPw">Password Baru</label>
+          <input type="password" id="ownNewPw" autocomplete="new-password" />
+        </div>
+        <button class="btn btn-ghost" id="changeOwnPwBtn">Simpan Password Baru</button>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3 class="card-title">Tambah User (Super Admin)</h3>
+        <div class="field">
+          <label for="newUsername">Username / Email</label>
+          <input type="text" id="newUsername" autocapitalize="off" placeholder="mis. rere@tatalogam.co.id" />
+        </div>
+        <div class="field">
+          <label for="newUserPw">Password Awal</label>
+          <input type="password" id="newUserPw" autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="newUserRole">Role</label>
+          <select id="newUserRole">
+            <option value="admin">Admin</option>
+            <option value="superadmin">Super Admin</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="addUserBtn">+ Tambah User</button>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3 class="card-title">Daftar User</h3>
+        <div id="usersListContainer"><p class="hint">Memuat…</p></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3 class="card-title">Log Login</h3>
+        <p class="hint" style="margin-bottom:14px;">Riwayat siapa saja yang login, 300 terakhir.</p>
+        <div id="loginLogContainer"><p class="hint">Memuat…</p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail review: laporan per-review -->
+  <div id="detailOverlay" class="detail-overlay" style="display:none;">
+    <div class="detail-panel">
+      <div class="detail-head">
+        <h2 id="detailTitle">Detail Review</h2>
+        <div>
+          <button class="btn btn-ghost" id="detailPdfBtn">Unduh PDF Laporan</button>
+          <button class="btn btn-ghost" id="detailCloseBtn">Tutup ✕</button>
+        </div>
+      </div>
+      <div id="detailBody" class="detail-body"></div>
+    </div>
+  </div>
+
+  <!-- Modal: Download Semua Data -->
+  <div id="downloadAllOverlay" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+      <div id="downloadChoiceView">
+        <h3>Download Semua Data</h3>
+        <p class="desc" id="downloadAllDesc">Pilih format unduhan.</p>
+        <div class="modal-options">
+          <label class="modal-option">
+            <input type="radio" name="dlAllMode" value="csv" checked />
+            <div>
+              <div class="opt-title">Ringkasan (CSV)</div>
+              <div class="opt-sub">Semua jawaban jadi kolom — 1 file, langsung bisa dibuka di Excel/Sheets</div>
+            </div>
+          </label>
+          <label class="modal-option">
+            <input type="radio" name="dlAllMode" value="xlsx" />
+            <div>
+              <div class="opt-title">Ringkasan (Excel .xlsx)</div>
+              <div class="opt-sub">Sama seperti CSV, tapi tersimpan langsung sebagai file Excel</div>
+            </div>
+          </label>
+          <label class="modal-option">
+            <input type="radio" name="dlAllMode" value="zip" />
+            <div>
+              <div class="opt-title">Lengkap (ZIP: laporan PDF + semua lampiran)</div>
+              <div class="opt-sub">1 folder per review, isinya laporan PDF + file dokumen pendukung yang diupload</div>
+            </div>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="downloadAllCancelBtn">Batal</button>
+          <button class="btn btn-primary" id="downloadAllConfirmBtn">Unduh</button>
+        </div>
+      </div>
+      <div id="downloadProgressView" style="display:none;">
+        <h3 id="downloadProgressTitle">Menyiapkan file…</h3>
+        <p class="desc" id="downloadProgressDesc"></p>
+        <div class="progress-track"><div class="progress-fill" id="downloadProgressFill"></div></div>
+        <div class="progress-label" id="downloadProgressLabel"></div>
+        <div class="modal-actions" style="margin-top:16px;">
+          <button class="btn btn-ghost" id="downloadProgressCloseBtn">Tutup</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

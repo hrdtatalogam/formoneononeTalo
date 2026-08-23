@@ -1,0 +1,9 @@
+{
+  "name": "review-one-on-one-tatalogam",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Form review kinerja one-on-one karyawan & atasan (tahunan), pertanyaan editable, upload file, simpan draft & lanjutkan lewat link, dan panel admin khusus tim.",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}
