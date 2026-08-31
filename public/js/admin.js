@@ -32,6 +32,11 @@
   const subSearchClear = document.getElementById("subSearchClear");
   const subResultCount = document.getElementById("subResultCount");
   const subStatusFilter = document.getElementById("subStatusFilter");
+  const subAtasanFilter = document.getElementById("subAtasanFilter");
+  const subPerusahaanFilter = document.getElementById("subPerusahaanFilter");
+  const subLokasiFilter = document.getElementById("subLokasiFilter");
+  const subDepartemenFilter = document.getElementById("subDepartemenFilter");
+  const subFilterResetBtn = document.getElementById("subFilterResetBtn");
   const downloadAllBtn = document.getElementById("downloadAllBtn");
   const downloadAllOverlay = document.getElementById("downloadAllOverlay");
   const downloadAllDesc = document.getElementById("downloadAllDesc");
@@ -435,12 +440,47 @@
 
   subSearchInput.addEventListener("input", applySubmissionFilter);
   subStatusFilter.addEventListener("change", () => { applySubmissionFilter(); });
+  subAtasanFilter.addEventListener("change", () => { applySubmissionFilter(); });
+  subPerusahaanFilter.addEventListener("change", () => { applySubmissionFilter(); });
+  subLokasiFilter.addEventListener("change", () => { applySubmissionFilter(); });
+  subDepartemenFilter.addEventListener("change", () => { applySubmissionFilter(); });
+
+  subFilterResetBtn.addEventListener("click", () => {
+    subSearchInput.value = "";
+    subStatusFilter.value = "";
+    subAtasanFilter.value = "";
+    subPerusahaanFilter.value = "";
+    subLokasiFilter.value = "";
+    subDepartemenFilter.value = "";
+    applySubmissionFilter();
+  });
 
   subSearchClear.addEventListener("click", () => {
     subSearchInput.value = "";
     applySubmissionFilter();
     subSearchInput.focus();
   });
+
+  // Isi ulang pilihan dropdown (Nama Penilai/Atasan, Perusahaan, Lokasi/Cabang,
+  // Departemen/Bagian) berdasarkan nilai-nilai unik yang benar-benar ada di
+  // data saat ini, supaya admin tinggal pilih dari daftar, bukan ketik manual.
+  // Pilihan yang sedang aktif tetap dipertahankan kalau masih ada di daftar baru.
+  function fillFacetSelect(selectEl, values, placeholder) {
+    const current = selectEl.value;
+    const unique = Array.from(new Set(values.filter((v) => v != null && String(v).trim() !== "")))
+      .sort((a, b) => String(a).localeCompare(String(b), "id", { sensitivity: "base" }));
+    selectEl.innerHTML = '<option value="">' + placeholder + "</option>" +
+      unique.map((v) => '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + "</option>").join("");
+    if (current && unique.includes(current)) selectEl.value = current;
+  }
+
+  function refreshFacetFilters(ids) {
+    const a = (r) => r.answers || {};
+    fillFacetSelect(subAtasanFilter, lastSubmissions.map((r) => ids.atasanId && a(r)[ids.atasanId]), "Semua Penilai/Atasan");
+    fillFacetSelect(subPerusahaanFilter, lastSubmissions.map((r) => ids.perusahaanId && a(r)[ids.perusahaanId]), "Semua Perusahaan");
+    fillFacetSelect(subLokasiFilter, lastSubmissions.map((r) => ids.lokasiId && a(r)[ids.lokasiId]), "Semua Lokasi/Cabang");
+    fillFacetSelect(subDepartemenFilter, lastSubmissions.map((r) => ids.departemenId && a(r)[ids.departemenId]), "Semua Departemen/Bagian");
+  }
 
   function csvEscape(val) {
     const s = val == null ? "" : String(val);
@@ -466,7 +506,8 @@
   // ---------- Download Semua Data (CSV/Excel ringkasan / ZIP berisi PDF per review) ----------
   downloadAllBtn.addEventListener("click", () => {
     const n = filteredSubmissions.length;
-    downloadAllDesc.textContent = "Pilih format unduhan untuk " + n + " review yang sedang tampil di daftar" + (subSearchInput.value.trim() ? " (sesuai hasil pencarian)" : "") + ".";
+    const anyFilterActive = !!(subSearchInput.value.trim() || subStatusFilter.value || subAtasanFilter.value || subPerusahaanFilter.value || subLokasiFilter.value || subDepartemenFilter.value);
+    downloadAllDesc.textContent = "Pilih format unduhan untuk " + n + " review yang sedang tampil di daftar" + (anyFilterActive ? " (sesuai pencarian/filter yang aktif)" : "") + ".";
     downloadChoiceView.style.display = "block";
     downloadProgressView.style.display = "none";
     downloadAllOverlay.style.display = "flex";
@@ -601,6 +642,8 @@
   const KEY_FIELD_KEYWORDS = {
     nama_karyawan: ["nama karyawan", "nama yang dinilai", "nama pegawai"],
     nama_atasan: ["nama atasan", "nama penilai"],
+    perusahaan: ["perusahaan", "company"],
+    lokasi: ["lokasi", "cabang", "branch"],
     departemen: ["department", "departemen", "bagian"],
     periode_review: ["periode"],
     nilai_bsc: ["nilai raport bsc", "nilai bsc", "skor"],
@@ -621,6 +664,8 @@
     return {
       namaId: guessKeyFieldId("nama_karyawan"),
       atasanId: guessKeyFieldId("nama_atasan"),
+      perusahaanId: guessKeyFieldId("perusahaan"),
+      lokasiId: guessKeyFieldId("lokasi"),
       departemenId: guessKeyFieldId("departemen"),
       periodeId: guessKeyFieldId("periode_review"),
       nilaiId: guessKeyFieldId("nilai_bsc"),
@@ -654,18 +699,33 @@
   function applySubmissionFilter() {
     const q = (subSearchInput.value || "").trim().toLowerCase();
     const statusFilter = subStatusFilter.value || "";
+    const atasanFilter = subAtasanFilter.value || "";
+    const perusahaanFilter = subPerusahaanFilter.value || "";
+    const lokasiFilter = subLokasiFilter.value || "";
+    const departemenFilter = subDepartemenFilter.value || "";
     const ids = keyFieldIds();
+
+    refreshFacetFilters(ids);
+
     filteredSubmissions = lastSubmissions.filter((r) => {
       if (statusFilter && recordStatus(r) !== statusFilter) return false;
+      const a = r.answers || {};
+      if (atasanFilter && String((ids.atasanId && a[ids.atasanId]) || "") !== atasanFilter) return false;
+      if (perusahaanFilter && String((ids.perusahaanId && a[ids.perusahaanId]) || "") !== perusahaanFilter) return false;
+      if (lokasiFilter && String((ids.lokasiId && a[ids.lokasiId]) || "") !== lokasiFilter) return false;
+      if (departemenFilter && String((ids.departemenId && a[ids.departemenId]) || "") !== departemenFilter) return false;
       if (!q) return true;
       const name = String(candidateName(r, ids) || "");
       return name.toLowerCase().includes(q);
     });
 
+    const anyFacet = !!(atasanFilter || perusahaanFilter || lokasiFilter || departemenFilter);
     subSearchClear.classList.toggle("show", !!q);
     if (lastSubmissions.length) {
       subResultCount.style.display = "block";
-      subResultCount.textContent = filteredSubmissions.length + " review" + (q ? ' ditemukan untuk "' + subSearchInput.value.trim() + '"' : "");
+      subResultCount.textContent = filteredSubmissions.length + " review" +
+        (q ? ' ditemukan untuk "' + subSearchInput.value.trim() + '"' : "") +
+        (anyFacet ? " (sesuai filter yang dipilih)" : "");
     } else {
       subResultCount.style.display = "none";
     }
