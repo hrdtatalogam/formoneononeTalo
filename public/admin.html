@@ -53,15 +53,40 @@
         <button class="btn btn-gold" id="downloadAllBtn">&#8681; Download Semua Data</button>
       </div>
       <div class="result-count" id="subResultCount" style="display:none;"></div>
-      <div class="toolbar" id="subFilterToolbar" style="margin-top:0;">
+      <div class="toolbar" id="subFilterToolbar" style="margin-top:0; flex-wrap:wrap; gap:12px;">
         <div class="field" style="margin:0;">
-          <label for="subStatusFilter" class="hint" style="margin:0 0 4px;">Filter</label>
+          <label for="subStatusFilter" class="hint" style="margin:0 0 4px;">Status</label>
           <select id="subStatusFilter">
             <option value="">Semua (Draft &amp; Final)</option>
             <option value="draft">Draft (belum selesai)</option>
             <option value="final">Sudah Final</option>
           </select>
         </div>
+        <div class="field" style="margin:0;">
+          <label for="subAtasanFilter" class="hint" style="margin:0 0 4px;">Nama Penilai / Atasan</label>
+          <select id="subAtasanFilter">
+            <option value="">Semua Penilai/Atasan</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0;">
+          <label for="subPerusahaanFilter" class="hint" style="margin:0 0 4px;">Perusahaan</label>
+          <select id="subPerusahaanFilter">
+            <option value="">Semua Perusahaan</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0;">
+          <label for="subLokasiFilter" class="hint" style="margin:0 0 4px;">Lokasi / Cabang</label>
+          <select id="subLokasiFilter">
+            <option value="">Semua Lokasi/Cabang</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0;">
+          <label for="subDepartemenFilter" class="hint" style="margin:0 0 4px;">Departemen / Bagian</label>
+          <select id="subDepartemenFilter">
+            <option value="">Semua Departemen/Bagian</option>
+          </select>
+        </div>
+        <button type="button" class="btn btn-ghost" id="subFilterResetBtn" style="align-self:flex-end;">Reset Filter</button>
       </div>
       <div id="submissionsContainer"><p class="hint">Memuat data…</p></div>
     </div>
