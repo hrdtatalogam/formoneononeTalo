@@ -352,7 +352,7 @@
       roleSelect.style.marginLeft = "6px";
       roleSelect.style.padding = "6px 8px";
       roleSelect.style.fontSize = "13px";
-      roleSelect.style.border = "1px solid #cfd3dc";
+      roleSelect.style.border = "1px solid #c4d3e6";
       roleSelect.style.borderRadius = "6px";
       roleSelect.innerHTML = '<option value="admin">Admin</option><option value="superadmin">Super Admin</option>';
       roleSelect.value = u.role === "superadmin" ? "superadmin" : "admin";
@@ -687,8 +687,21 @@
     return iso ? new Date(iso).toLocaleString("id-ID") : "\u2014";
   }
 
+  function updateStats() {
+    const ids = keyFieldIds();
+    const total = lastSubmissions.length;
+    const fin = lastSubmissions.filter((r) => recordStatus(r) === "final").length;
+    const penilai = new Set(lastSubmissions.map((r) => String(((r.answers || {})[ids.atasanId]) || "").trim()).filter(Boolean));
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set("statTotal", total);
+    set("statFinal", fin);
+    set("statDraft", total - fin);
+    set("statPenilai", penilai.size);
+  }
+
   function renderSubmissions(records) {
     lastSubmissions = records || [];
+    updateStats();
     subToolbar.style.display = lastSubmissions.length ? "flex" : "none";
     applySubmissionFilter();
   }
@@ -936,6 +949,20 @@
   // buildCandidatePdfDoc mengembalikan objek jsPDF (belum di-save), supaya bisa
   // dipakai ulang baik untuk download satu laporan maupun untuk digabung jadi ZIP
   // di fitur "Download Semua Data".
+  let PDF_LOGO = null;
+  (function preloadLogo() {
+    const img = new Image();
+    img.onload = function () {
+      try {
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        c.getContext("2d").drawImage(img, 0, 0);
+        PDF_LOGO = { data: c.toDataURL("image/png"), w: img.naturalWidth, h: img.naturalHeight };
+      } catch (e) { PDF_LOGO = null; }
+    };
+    img.src = "/images/images.png";
+  })();
+
   function buildCandidatePdfDoc(record) {
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -949,19 +976,21 @@
       let y = 50;
       const a = record.answers || {};
 
-      const NAVY = [11, 31, 59];
-      const INK = [28, 31, 38];
-      const SOFT = [91, 98, 112];
-      const LINE = [224, 224, 224];
-      const BOX_BG = [247, 245, 238];
-      const BOX_BORDER = [222, 216, 201];
+      const NAVY = [0, 84, 164];   // biru Tatalogam
+      const LIME = [156, 200, 20];
+      const DARK = [11, 42, 74];
+      const INK = [18, 38, 63];
+      const SOFT = [90, 111, 136];
+      const LINE = [227, 235, 244];
+      const BOX_BG = [238, 243, 249];
+      const BOX_BORDER = [196, 211, 230];
 
       function ensureSpace(next) {
-        if (y + next > pageHeight - 40) { doc.addPage(); y = 50; }
+        if (y + next > pageHeight - 56) { doc.addPage(); y = 50; }
       }
 
       function ensureBlock(estimatedHeight) {
-  const maxPerPage = pageHeight - 50 - 40;
+  const maxPerPage = pageHeight - 50 - 56;
   const capped = Math.min(estimatedHeight, maxPerPage);
   ensureSpace(capped);
 }
@@ -1117,7 +1146,7 @@
           let iy = boxTop + 18;
           doc.setFont("helvetica", "bold");
           doc.setFontSize(8.5);
-          doc.setTextColor(201, 162, 39);
+          doc.setTextColor(90, 125, 0);
           doc.text(sanitizePdfText(String(q.itemLabel || "Baris").toUpperCase() + " " + (idx + 1)), marginX + 12, boxTop + 12);
 
           fieldLines.forEach((f) => {
@@ -1137,21 +1166,27 @@
           y = boxTop + boxH + 8;
         });
       }
-      // ---- Header laporan ----
+      // ---- Header laporan (gaya form investigator: logo + judul biru + garis biru/lime) ----
+      let hx = marginX;
+      if (PDF_LOGO) {
+        const lh = 52, lw = lh * PDF_LOGO.w / PDF_LOGO.h;
+        try { doc.addImage(PDF_LOGO.data, "PNG", marginX, 26, lw, lh); hx = marginX + lw + 14; } catch (e) {}
+      }
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(17);
+      doc.setFontSize(15);
       doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
-      doc.text("Laporan Review Kinerja One-on-One", marginX, y);
-      y += 8;
-      doc.setDrawColor(NAVY[0], NAVY[1], NAVY[2]);
-      doc.setLineWidth(1.4);
-      doc.line(marginX, y, marginX + usableWidth, y);
-      y += 16;
+      doc.text("LAPORAN REVIEW KINERJA", hx, 48);
+      doc.text("ONE-ON-ONE", hx, 66);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.setTextColor(SOFT[0], SOFT[1], SOFT[2]);
-      doc.text("Dikirim: " + new Date(record.submittedAt).toLocaleString("id-ID"), marginX, y);
-      y += 20;
+      doc.text("Dikirim " + sanitizePdfText(new Date(record.submittedAt || record.updatedAt || Date.now()).toLocaleString("id-ID")), pageWidth - marginX, 48, { align: "right" });
+      doc.text("ID " + sanitizePdfText(String(record.id || "")), pageWidth - marginX, 60, { align: "right" });
+      doc.setFillColor(NAVY[0], NAVY[1], NAVY[2]);
+      doc.rect(0, 88, pageWidth * 0.7, 5, "F");
+      doc.setFillColor(LIME[0], LIME[1], LIME[2]);
+      doc.rect(pageWidth * 0.7, 88, pageWidth * 0.3, 5, "F");
+      y = 118;
 
       sections.forEach((sec) => {
         const secQuestions = questions.filter((q) => (q.section || sections[0].id) === sec.id);
@@ -1162,8 +1197,10 @@
         doc.setFont("helvetica", "bold");
         doc.setFontSize(11.5);
         doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
-        doc.text(sanitizePdfText(sec.title.toUpperCase()), marginX, y);
-        y += 7;
+        doc.setFillColor(LIME[0], LIME[1], LIME[2]);
+        doc.roundedRect(marginX, y - 11, 4, 14, 1.5, 1.5, "F");
+        doc.text(sanitizePdfText(sec.title), marginX + 11, y);
+        y += 8;
         doc.setDrawColor(LINE[0], LINE[1], LINE[2]);
         doc.setLineWidth(0.8);
         doc.line(marginX, y, marginX + usableWidth, y);
@@ -1204,6 +1241,20 @@
           doc.text("\u2022 " + sanitizePdfText(f.filename), marginX + 4, y);
           y += 14;
         });
+      }
+
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let pg = 1; pg <= totalPages; pg++) {
+        doc.setPage(pg);
+        doc.setFillColor(LIME[0], LIME[1], LIME[2]);
+        doc.rect(0, pageHeight - 30, pageWidth, 3, "F");
+        doc.setFillColor(DARK[0], DARK[1], DARK[2]);
+        doc.rect(0, pageHeight - 27, pageWidth, 27, "F");
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(185, 205, 228);
+        doc.text("Tatalogam Group - Form Review Kinerja One-on-One", marginX, pageHeight - 10);
+        doc.text("Halaman " + pg + " / " + totalPages, pageWidth - marginX, pageHeight - 10, { align: "right" });
       }
 
       const cleanName = String(candidateName(record)).replace(/[^a-z0-9]+/gi, "-").slice(0, 40);
@@ -1277,7 +1328,7 @@
       descInput.type = "text";
       descInput.placeholder = "Deskripsi singkat bagian ini (opsional)";
       descInput.value = sec.description || "";
-      descInput.style.cssText = "margin-top:6px; padding:8px 10px; font-size:13px; border:1px solid #cfd3dc; border-radius:6px; width:100%; font-family:var(--font-body);";
+      descInput.style.cssText = "margin-top:6px; padding:8px 10px; font-size:13px; border:1px solid #c4d3e6; border-radius:6px; width:100%; font-family:var(--font-body);";
       descInput.addEventListener("input", () => { sec.description = descInput.value; });
       main.appendChild(descInput);
 
@@ -1373,7 +1424,7 @@
     descInput.placeholder = "Deskripsi/keterangan (opsional)";
     descInput.value = q.description || "";
     descInput.rows = 1;
-    descInput.style.cssText = "margin-top:6px; padding:8px 10px; font-size:13px; border:1px solid #cfd3dc; border-radius:6px; width:100%; font-family:var(--font-body); resize:vertical;";
+    descInput.style.cssText = "margin-top:6px; padding:8px 10px; font-size:13px; border:1px solid #c4d3e6; border-radius:6px; width:100%; font-family:var(--font-body); resize:vertical;";
     descInput.addEventListener("input", () => (q.description = descInput.value));
     main.appendChild(descInput);
 
@@ -1381,7 +1432,7 @@
     optionsInput.type = "text";
     optionsInput.placeholder = "Pilihan, pisahkan dengan koma (khusus Dropdown/Radio)";
     optionsInput.value = (q.options || []).join(", ");
-    optionsInput.style.cssText = "margin-top:6px; padding:8px 10px; font-size:13px; border:1px solid #cfd3dc; border-radius:6px; width:100%; font-family:var(--font-body); display:" + ((q.type === "select" || q.type === "radio") ? "block" : "none") + ";";
+    optionsInput.style.cssText = "margin-top:6px; padding:8px 10px; font-size:13px; border:1px solid #c4d3e6; border-radius:6px; width:100%; font-family:var(--font-body); display:" + ((q.type === "select" || q.type === "radio") ? "block" : "none") + ";";
     optionsInput.addEventListener("input", () => {
       q.options = optionsInput.value.split(",").map((s) => s.trim()).filter(Boolean);
     });
@@ -1447,13 +1498,13 @@
       subUpBtn.type = "button";
       subUpBtn.textContent = "\u25B2";
       subUpBtn.disabled = sIdx === 0;
-      subUpBtn.style.cssText = "padding:2px 7px; font-size:10px; line-height:1; border:1px solid #cfd3dc; border-radius:4px; background:#fff; cursor:pointer;";
+      subUpBtn.style.cssText = "padding:2px 7px; font-size:10px; line-height:1; border:1px solid #c4d3e6; border-radius:4px; background:#fff; cursor:pointer;";
       subUpBtn.addEventListener("click", () => moveSubField(wrap, q, sIdx, -1));
       const subDownBtn = document.createElement("button");
       subDownBtn.type = "button";
       subDownBtn.textContent = "\u25BC";
       subDownBtn.disabled = sIdx === q.fields.length - 1;
-      subDownBtn.style.cssText = "padding:2px 7px; font-size:10px; line-height:1; border:1px solid #cfd3dc; border-radius:4px; background:#fff; cursor:pointer;";
+      subDownBtn.style.cssText = "padding:2px 7px; font-size:10px; line-height:1; border:1px solid #c4d3e6; border-radius:4px; background:#fff; cursor:pointer;";
       subDownBtn.addEventListener("click", () => moveSubField(wrap, q, sIdx, 1));
       subOrder.appendChild(subUpBtn);
       subOrder.appendChild(subDownBtn);
