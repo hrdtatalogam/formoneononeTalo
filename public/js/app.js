@@ -42,6 +42,338 @@
   let pendingResumeAnswers = null;
   let pendingResumeFiles = [];
 
+  // =====================================================================
+  // ISI BERSAMA (near real-time)
+  // Begitu draft sudah punya link, siapa pun yang membuka link yang sama
+  // melihat isian satu sama lain (±2-3 detik) dan bisa mengisi bersamaan.
+  // - Hanya kolom yang berubah yang dikirim, jadi tidak saling menimpa.
+  // - Kolom yang sedang diisi orang lain dikunci (ada label "sedang mengisi").
+  // =====================================================================
+  const NAME_KEY = "oneonone_collab_name";
+  const collabBar = document.getElementById("collabBar");
+  const nameModal = document.getElementById("nameModal");
+  const nameInput = document.getElementById("nameInput");
+  const nameOkBtn = document.getElementById("nameOkBtn");
+  const nameSkipBtn = document.getElementById("nameSkipBtn");
+  const draftNameInput = document.getElementById("draftNameInput");
+  const shareLiveBtn = document.getElementById("shareLiveBtn");
+
+  const collab = {
+    active: false,
+    stopped: false,
+    clientId: Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4),
+    name: "",
+    rev: 0,
+    dirty: {},
+    retries: {},
+    focus: null,
+    inflight: false,
+    pending: false,
+    applying: false,
+    online: true,
+    others: [],
+    locked: new Set(),
+    tickT: null,
+    soonT: null,
+    sigT: null,
+    lastActivity: Date.now(),
+  };
+  collab.name = (function () { try { return localStorage.getItem(NAME_KEY) || ""; } catch (e) { return ""; } })();
+
+  function setCollabName(n) {
+    collab.name = String(n || "").trim().slice(0, 40);
+    try { localStorage.setItem(NAME_KEY, collab.name); } catch (e) {}
+    renderCollabBar();
+    syncSoon(0);
+  }
+
+  function qidOf(el) {
+    if (!el || !el.closest) return null;
+    const d = el.closest("[data-qid]");
+    if (d) return d.dataset.qid;
+    const s = el.closest("[data-sig]");
+    if (s) return s.dataset.sig;
+    const c = el.closest("[data-sig-clear]");
+    return c ? c.dataset.sigClear : null;
+  }
+
+  function questionById(qid) { return QUESTIONS.find((q) => q.id === qid); }
+
+  function markDirty(qid) {
+    if (!collab.active || collab.applying || !qid) return;
+    const q = questionById(qid);
+    if (!q || q.type === "file") return;
+    collab.dirty[qid] = true;
+    collab.lastActivity = Date.now();
+    syncSoon(600);
+  }
+
+  function sigFocus(qid) {
+    if (!collab.active) return;
+    collab.focus = qid;
+    collab.lastActivity = Date.now();
+    clearTimeout(collab.sigT);
+    collab.sigT = setTimeout(() => {
+      if (collab.focus === qid) collab.focus = null;
+      syncSoon(0);
+    }, 3000);
+    syncSoon(0);
+  }
+
+  function norm(v) { return v === undefined || v === null ? "" : v; }
+
+  function syncSoon(ms) {
+    if (!collab.active || collab.stopped) return;
+    clearTimeout(collab.soonT);
+    collab.soonT = setTimeout(syncOnce, ms);
+  }
+
+  function scheduleTick() {
+    clearTimeout(collab.tickT);
+    if (!collab.active || collab.stopped) return;
+    const idle = Date.now() - collab.lastActivity > 120000;
+    const delay = document.hidden ? 20000 : (idle ? 8000 : 2500);
+    collab.tickT = setTimeout(async () => { await syncOnce(); scheduleTick(); }, delay);
+  }
+
+  async function syncOnce() {
+    if (!collab.active || collab.stopped) return;
+    if (collab.inflight) { collab.pending = true; return; }
+    collab.inflight = true;
+    try {
+      const snap = collectFormData().answers;
+      const changes = {};
+      const sent = {};
+      Object.keys(collab.dirty).forEach((qid) => {
+        if (snap[qid] === undefined) { delete collab.dirty[qid]; return; }
+        changes[qid] = snap[qid];
+        sent[qid] = JSON.stringify(snap[qid]);
+      });
+
+      const res = await fetch("/.netlify/functions/sync-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: draftId, token: draftToken, clientId: collab.clientId,
+          name: collab.name || "Tamu", focus: collab.focus, rev: collab.rev, changes: changes,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok) { collab.online = false; renderCollabBar(); return; }
+      collab.online = true;
+      if (data.final) { handleRemoteFinal(); return; }
+
+      const server = data.answers || null;
+      const now = collectFormData().answers;
+      const lockedNow = new Set((data.presence || []).map((o) => o.focus).filter(Boolean));
+
+      // Kolom yang kukirim: lepas dari "dirty" kalau server sudah menyimpannya.
+      Object.keys(sent).forEach((qid) => {
+        const saved = server ? JSON.stringify(server[qid]) === sent[qid] : true;
+        const unchanged = JSON.stringify(now[qid]) === sent[qid];
+        if (saved && unchanged) { delete collab.dirty[qid]; delete collab.retries[qid]; return; }
+        if (!saved) {
+          // Tulisan hilang karena tabrakan: kirim ulang, tapi jangan rebutan terus-menerus.
+          collab.retries[qid] = (collab.retries[qid] || 0) + 1;
+          if (collab.retries[qid] > 3 || lockedNow.has(qid)) { delete collab.dirty[qid]; delete collab.retries[qid]; }
+        }
+      });
+
+      // Terapkan perubahan dari orang lain ke kolom yang tidak sedang kuedit.
+      if (server) {
+        collab.rev = data.rev || 0;
+        let changed = false;
+        QUESTIONS.forEach((q) => {
+          if (q.type === "file") return;
+          if (collab.dirty[q.id] || collab.focus === q.id) return;
+          if (server[q.id] === undefined) return;
+          if (JSON.stringify(norm(server[q.id])) === JSON.stringify(norm(now[q.id]))) return;
+          applyRemote(q, server);
+          changed = true;
+        });
+        if (changed) collab.lastActivity = Date.now();
+      }
+
+      applyPresence(data.presence || []);
+      if (Object.keys(collab.dirty).length) collab.pending = true;
+    } catch (e) {
+      collab.online = false;
+      renderCollabBar();
+    } finally {
+      collab.inflight = false;
+      if (collab.pending) { collab.pending = false; syncSoon(150); }
+    }
+  }
+
+  function applyRemote(q, answers) {
+    collab.applying = true;
+    try {
+      if (q.type === "signature") {
+        const canvas = sectionsContainer.querySelector('canvas[data-sig="' + q.id + '"]');
+        if (!canvas) return;
+        const val = answers[q.id];
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (signaturePads[q.id]) signaturePads[q.id].hasDrawing = !!val;
+        if (val) {
+          const img = new Image();
+          img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); };
+          img.src = val;
+        }
+      } else if (q.type === "repeater") {
+        const holder = sectionsContainer.querySelector('[data-repeater-holder="' + q.id + '"]');
+        const rows = answers[q.id];
+        fillQuestion(q, answers, []);
+        if (holder && Array.isArray(rows)) {
+          const keep = Math.max(rows.length, q.minRows || 1);
+          let items = holder.querySelectorAll(".repeater-item");
+          while (items.length > keep) { items[items.length - 1].remove(); items = holder.querySelectorAll(".repeater-item"); }
+          renumberRepeater(holder, q.itemLabel);
+        }
+      } else if (q.type === "radio") {
+        const val = answers[q.id];
+        const radios = sectionsContainer.querySelectorAll('[data-qid="' + q.id + '"]:not([data-row])');
+        radios.forEach((r) => { r.checked = String(r.value) === String(val); });
+      } else {
+        fillQuestion(q, answers, []);
+      }
+    } finally {
+      collab.applying = false;
+    }
+  }
+
+  function fieldWrapsFor(qid) {
+    const wraps = new Set();
+    const holder = sectionsContainer.querySelector('[data-repeater-holder="' + qid + '"]');
+    if (holder) { const w = holder.closest(".field"); if (w) wraps.add(w); }
+    const canvas = sectionsContainer.querySelector('canvas[data-sig="' + qid + '"]');
+    if (canvas) { const w = canvas.closest(".field"); if (w) wraps.add(w); }
+    sectionsContainer.querySelectorAll('[data-qid="' + qid + '"]:not([data-row])').forEach((el) => {
+      const w = el.closest(".field"); if (w) wraps.add(w);
+    });
+    return Array.from(wraps);
+  }
+
+  function applyPresence(list) {
+    collab.others = list;
+    collab.locked.forEach((el) => { el.inert = false; el.classList.remove("locked-by"); el.removeAttribute("data-locker"); });
+    collab.locked.clear();
+    list.forEach((o) => {
+      if (!o.focus) return;
+      collab.lastActivity = Date.now();
+      // Dua orang masuk ke kolom yang sama di detik yang sama: yang ID-nya lebih besar mengalah.
+      if (o.focus === collab.focus && o.clientId < collab.clientId) {
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        collab.focus = null;
+      }
+      if (collab.focus === o.focus) return;
+      fieldWrapsFor(o.focus).forEach((w) => {
+        w.classList.add("locked-by");
+        w.dataset.locker = o.name || "Tamu";
+        w.inert = true;
+        collab.locked.add(w);
+      });
+    });
+    renderCollabBar();
+  }
+
+  function renderCollabBar() {
+    if (!collabBar) return;
+    if (!collab.active || collab.stopped) { collabBar.style.display = "none"; return; }
+    collabBar.style.display = "flex";
+    const names = ["Kamu" + (collab.name ? " (" + collab.name + ")" : "")].concat(
+      Array.from(new Set(collab.others.map((o) => o.name || "Tamu")))
+    );
+    collabBar.className = "collab-bar" + (collab.online ? "" : " offline");
+    collabBar.innerHTML =
+      '<span class="collab-dot"></span>' +
+      '<b>' + (collab.online ? "Isi bersama aktif" : "Terputus — mencoba lagi…") + '</b>' +
+      '<span class="collab-names">' + names.map(escapeHtml).join(" · ") + '</span>';
+  }
+
+  function handleRemoteFinal() {
+    stopCollab();
+    resumeBanner.style.display = "block";
+    resumeBanner.classList.add("resume-banner-err");
+    resumeBannerText.textContent = "Review ini sudah dikirim final (oleh kamu atau peserta lain) dan tidak bisa diubah lagi.";
+    if (formLayout) formLayout.inert = true;
+  }
+
+  async function collabFlush() {
+    if (!collab.active || collab.stopped) return;
+    for (let i = 0; i < 50 && collab.inflight; i++) await new Promise((r) => setTimeout(r, 100));
+    await syncOnce();
+  }
+
+  function startCollab(opts) {
+    opts = opts || {};
+    if (collab.active || !draftId || !draftToken) { if (collab.active) renderCollabBar(); return; }
+    collab.active = true;
+    collab.stopped = false;
+    collab.online = true;
+    collab.lastActivity = Date.now();
+    renderCollabBar();
+
+    // Perubahan yang terjadi di antara klik "simpan" dan sekarang tetap dikirim.
+    if (opts.savedAnswers) {
+      const cur = collectFormData().answers;
+      Object.keys(cur).forEach((qid) => {
+        if (JSON.stringify(norm(cur[qid])) !== JSON.stringify(norm(opts.savedAnswers[qid]))) collab.dirty[qid] = true;
+      });
+    }
+
+    if (opts.askName && !collab.name && nameModal) {
+      nameInput.value = "";
+      nameModal.style.display = "flex";
+      setTimeout(() => nameInput.focus(), 50);
+    }
+    syncSoon(0);
+    scheduleTick();
+  }
+
+  function stopCollab() {
+    collab.stopped = true;
+    collab.active = false;
+    clearTimeout(collab.tickT);
+    clearTimeout(collab.soonT);
+    collab.locked.forEach((el) => { el.inert = false; el.classList.remove("locked-by"); el.removeAttribute("data-locker"); });
+    collab.locked.clear();
+    renderCollabBar();
+  }
+
+  // Deteksi perubahan & fokus lewat event delegation (sekali pasang).
+  if (sectionsContainer) {
+    const onEdit = (e) => {
+      if (e.target && e.target.type === "file") return;
+      markDirty(qidOf(e.target));
+    };
+    sectionsContainer.addEventListener("input", onEdit);
+    sectionsContainer.addEventListener("change", onEdit);
+    sectionsContainer.addEventListener("focusin", (e) => {
+      if (!collab.active) return;
+      const qid = qidOf(e.target);
+      if (!qid) return;
+      collab.focus = qid;
+      collab.lastActivity = Date.now();
+      syncSoon(0);
+    });
+    sectionsContainer.addEventListener("focusout", () => {
+      setTimeout(() => {
+        if (!collab.active) return;
+        if (!sectionsContainer.contains(document.activeElement)) {
+          const onSig = collab.focus && sectionsContainer.querySelector('canvas[data-sig="' + collab.focus + '"]');
+          if (!onSig) collab.focus = null;
+        }
+        syncSoon(150);
+      }, 60);
+    });
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { syncSoon(0); scheduleTick(); } });
+  if (nameOkBtn) nameOkBtn.addEventListener("click", () => { setCollabName(nameInput.value || "Tamu"); nameModal.style.display = "none"; });
+  if (nameSkipBtn) nameSkipBtn.addEventListener("click", () => { setCollabName("Tamu"); nameModal.style.display = "none"; });
+  if (nameInput) nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") nameOkBtn.click(); });
+  if (shareLiveBtn) shareLiveBtn.addEventListener("click", () => saveDraft());
+
   function buildResumeLink(id, token) {
     return window.location.origin + window.location.pathname + "?resume=" + encodeURIComponent(id + ":" + token);
   }
@@ -129,6 +461,7 @@
           pendingResumeAnswers = draft.answers || {};
           pendingResumeFiles = draft.files || [];
           populateForm(pendingResumeAnswers, pendingResumeFiles);
+          startCollab({ askName: true });
           resumeBanner.style.display = "block";
           resumeBannerText.textContent = "Melanjutkan draft yang tersimpan sebelumnya" + (draft.updatedAt ? (" (terakhir disimpan " + new Date(draft.updatedAt).toLocaleString("id-ID") + ")") : "") + ".";
         }
@@ -164,7 +497,7 @@
       const head = document.createElement("div");
       head.className = "panel-head";
       head.innerHTML =
-        '<div class="section-eyebrow">Bagian ' + (idx + 1) + '</div>' +
+        '<span class="sec-badge">' + (idx + 1) + '</span>' +
         '<h2>' + escapeHtml(sec.title) + '</h2>' +
         (sec.description ? '<p>' + escapeHtml(sec.description) + '</p>' : "");
       secEl.appendChild(head);
@@ -277,7 +610,7 @@
       dataAttrs(fileInput);
       const sizeHint = document.createElement("p");
       sizeHint.className = "hint file-size-hint";
-      sizeHint.style.cssText = "margin:5px 0 0; font-size:11.5px; color:var(--ink-soft, #5b6270);";
+      sizeHint.style.cssText = "margin:5px 0 0; font-size:12.5px; color:var(--muted, #5a6f88);";
       sizeHint.textContent = "Maksimal " + formatBytes(MAX_UPLOAD_BYTES) + " per file.";
       const fileWarn = document.createElement("p");
       fileWarn.className = "hint file-size-warn";
@@ -352,7 +685,7 @@
     addBtn.type = "button";
     addBtn.className = "btn-add";
     addBtn.textContent = q.addLabel || ("+ Tambah " + (q.itemLabel || "Baris"));
-    addBtn.addEventListener("click", () => addRepeaterRow(q, rowsHolder));
+    addBtn.addEventListener("click", () => { addRepeaterRow(q, rowsHolder); markDirty(q.id); });
     holder.appendChild(addBtn);
 
     const minRows = q.minRows || 1;
@@ -385,6 +718,7 @@
       item.remove();
       renumberRepeater(rowsHolder, q.itemLabel);
       recomputeFileBudget();
+      markDirty(q.id);
     });
     item.appendChild(removeBtn);
 
@@ -414,7 +748,7 @@
     const canvas = sectionsContainer.querySelector('canvas[data-sig="' + qid + '"]');
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    ctx.strokeStyle = "#0b1f3b";
+    ctx.strokeStyle = "#0b2a4a";
     ctx.lineWidth = 2;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
@@ -429,7 +763,7 @@
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
       return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
     }
-    function start(e) { drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
+    function start(e) { drawing = true; sigFocus(qid); const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
     function move(e) {
       if (!drawing) return;
       const p = pos(e);
@@ -438,7 +772,7 @@
       signaturePads[qid].hasDrawing = true;
       e.preventDefault();
     }
-    function end() { drawing = false; }
+    function end() { if (!drawing) return; drawing = false; sigFocus(qid); markDirty(qid); }
 
     canvas.addEventListener("mousedown", start);
     canvas.addEventListener("mousemove", move);
@@ -452,6 +786,7 @@
       clearBtn.addEventListener("click", () => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         signaturePads[qid].hasDrawing = false;
+        markDirty(qid);
       });
     }
   }
@@ -631,6 +966,7 @@
     nextBtn.textContent = "Mengirim\u2026";
     if (saveDraftBtn) saveDraftBtn.disabled = true;
 
+    await collabFlush();
     const { answers, filesToUpload } = collectFormData();
 
     try {
@@ -663,6 +999,7 @@
         return;
       }
 
+      stopCollab();
       resumeBanner.style.display = "none";
       formLayout.style.display = "none";
       document.querySelector(".letterhead").style.display = "none";
@@ -681,6 +1018,7 @@
     const originalText = saveDraftBtn.textContent;
     saveDraftBtn.textContent = "Menyimpan\u2026";
 
+    await collabFlush();
     const { answers, filesToUpload } = collectFormData();
 
     try {
@@ -711,7 +1049,9 @@
       history.replaceState(null, "", "?resume=" + draftId + ":" + draftToken);
       draftLinkInput.value = link;
       draftCopiedHint.style.display = "none";
+      if (draftNameInput) draftNameInput.value = collab.name || localStorage.getItem(NAME_KEY) || "";
       draftModal.style.display = "flex";
+      startCollab({ savedAnswers: answers, askName: false });
     } catch (e) {
       showAlert("err", "Gagal terhubung ke server. Periksa koneksi internet kamu.");
     } finally {
@@ -721,7 +1061,10 @@
   }
 
   if (saveDraftBtn) saveDraftBtn.addEventListener("click", saveDraft);
-  if (closeDraftModalBtn) closeDraftModalBtn.addEventListener("click", () => { draftModal.style.display = "none"; });
+  if (closeDraftModalBtn) closeDraftModalBtn.addEventListener("click", () => {
+    draftModal.style.display = "none";
+    if (draftNameInput && draftNameInput.value.trim()) setCollabName(draftNameInput.value);
+  });
   if (copyDraftLinkBtn) {
     copyDraftLinkBtn.addEventListener("click", async () => {
       try {
@@ -737,7 +1080,11 @@
   // Mengisi ulang form dari data draft yang sudah tersimpan sebelumnya
   // (dipanggil setelah render() sehingga semua elemen DOM sudah ada).
   function populateForm(answers, filesInfo) {
-    QUESTIONS.forEach((q) => {
+    QUESTIONS.forEach((q) => fillQuestion(q, answers, filesInfo));
+  }
+
+  function fillQuestion(q, answers, filesInfo) {
+    {
       if (q.type === "repeater") {
         const rowsHolder = sectionsContainer.querySelector('[data-repeater-holder="' + q.id + '"]');
         const rowsData = answers[q.id];
@@ -778,7 +1125,7 @@
       const el = sectionsContainer.querySelector('[data-qid="' + q.id + '"]:not([data-row])');
       if (!el) return;
       fillOneField(el, q, answers[q.id], null, null, filesInfo);
-    });
+    }
   }
 
   function fillOneField(el, q, val, repeaterId, rowIndex, filesInfo) {

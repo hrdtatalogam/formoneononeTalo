@@ -126,6 +126,7 @@ exports.handler = async (event) => {
     id,
     status: mode === "final" ? "final" : "draft",
     answers,
+    rev: ((record && record.rev) || 0) + 1,
     files: finalFiles,
     resumeTokenHash: resumeTokenHash || null,
     createdAt: (record && record.createdAt) || nowIso,
